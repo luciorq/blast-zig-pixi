@@ -1,0 +1,127 @@
+schema_version: 1
+
+context:
+  version: "2.17.0"
+
+package:
+  name: blast
+  version: ${{ version }}
+
+source:
+  url: https://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/${{ version }}/ncbi-blast-${{ version }}+-src.tar.gz
+  sha256: 502057a88e9990e34e62758be21ea474cc0ad68d6a63a2e37b2372af1e5ea147
+
+build:
+  # Base build number 3; on x86_64 the microarch level contributes its
+  # hundreds digit (203 / 303) so the solver prefers the highest level
+  # the CPU supports (prefix.dev microarch pattern). Non-x86_64 targets
+  # never touch microarch_level and stay a single variant at the base.
+  number: ${{ (3 + microarch_level|int * 100) if x86_64 else 3 }}
+  script:
+    env:
+      MICROARCH_LEVEL: ${{ microarch_level if x86_64 else "" }}
+  # v3 variant flags: provenance + the compiled-in CPU baseline,
+  # selectable explicitly via e.g. blast[flags=[cpu:x86_64_v3]]. Flag
+  # segments only allow [a-z0-9_].
+  flags:
+    - toolchain:zig
+    - if: x86_64
+      then: cpu:x86_64_v${{ microarch_level }}
+
+requirements:
+  build:
+    # zig cc / zig c++ are the C/C++ compilers on every platform; no
+    # gcc/clang/msvc toolchain packages are pulled in.
+    - zig
+    - if: unix
+      then:
+        # Complete userland for NCBI's configure/make; the build script
+        # restricts PATH to the conda build/host envs, so nothing may
+        # resolve from /usr/bin.
+        - bash
+        - make
+        - sed
+        - grep
+        - gawk
+        - coreutils
+        - findutils
+        - diffutils
+        - patch
+        - tar
+    - if: linux
+      then:
+        # conda-forge's liblmdb.so carries no SONAME, so lld records the
+        # absolute build-prefix path as DT_NEEDED; patchelf rewrites it.
+        - patchelf
+    - if: win
+      then:
+        # MSYS2 userland to run the NCBI configure/make build, with zig
+        # targeting x86_64-windows-gnu.
+        - m2-base
+        - m2-bash
+        - m2-coreutils
+        - m2-diffutils
+        - m2-findutils
+        - m2-gawk
+        - m2-grep
+        - m2-make
+        - m2-sed
+        - m2-tar
+  host:
+    # Identical on every platform. On win-64 the compiler shims resolve
+    # conda-forge's MSVC-style library names (lib<n>.lib / <n>.lib /
+    # lib<n>.dll.a) for the -windows-gnu target, so the same host deps
+    # work everywhere. sqlite3 is required: without it, NCBI's
+    # project_tree_builder silently drops the seqdb library (REQUIRES =
+    # SQLITE3) and every masker app fails. llvm-openmp supplies the
+    # omp.h/libomp that zig cc does not bundle.
+    - zlib
+    - bzip2
+    - lmdb
+    - libsqlite
+    - llvm-openmp
+    - if: osx
+      then:
+        # C++ runtime from conda-forge rather than the system one in
+        # /usr/lib, so nothing outside the environment is relied on.
+        - libcxx
+  run:
+    - if: linux
+      then:
+        # Must match the glibc floor pinned in build.sh's zig target.
+        - __glibc >=2.17
+    - if: osx
+      then:
+        # conda-forge's libcxx ships no run_exports, so the C++ runtime
+        # the binaries load (@rpath/libc++.1.dylib) has to be requested
+        # explicitly or they fail at startup with "Library not loaded".
+        - libcxx
+  # v3 optional dependency groups. The base package stays lean; the
+  # bundled helper scripts (update_blastdb.pl, legacy_blast.pl,
+  # cleanup-blastdb-volumes.py) get working interpreters via
+  # blast[extras=[scripts]].
+  extras:
+    scripts:
+      - perl >=5.32
+      - python >=3.10
+
+tests:
+  - script:
+      - blastn -version
+      - blastp -version
+      - makeblastdb -version
+      - blastdbcmd -version
+
+about:
+  homepage: https://blast.ncbi.nlm.nih.gov/
+  repository: https://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/
+  documentation: https://www.ncbi.nlm.nih.gov/books/NBK279690/
+  summary: NCBI BLAST+ command line applications
+  description: |
+    BLAST+ is a suite of command-line tools from NCBI to run BLAST
+    (Basic Local Alignment Search Tool), an algorithm for comparing
+    primary biological sequence information. This package is built from
+    the NCBI C++ Toolkit sources using zig cc / zig c++ as the compiler
+    toolchain.
+  license: NCBI-PD
+  license_file: c++/scripts/projects/blast/LICENSE

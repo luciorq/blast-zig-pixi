@@ -1,0 +1,7 @@
+# CPU microarchitecture variant axis (x86_64 only — the recipe references
+# microarch_level exclusively under `if: x86_64`, so non-x86_64 targets
+# collapse to a single variant). Level 2 = SSE4.2/popcnt (the floor NCBI's
+# code requires anyway); level 3 = AVX2.
+microarch_level:
+  - "2"
+  - "3"

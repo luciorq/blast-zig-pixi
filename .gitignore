@@ -38,3 +38,9 @@ uv.lock
 *.so
 *.dylib
 *.dll
+# pixi environments
+.pixi/*
+!.pixi/config.toml
+# build outputs
+dist/
+*.conda

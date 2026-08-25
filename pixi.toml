@@ -1,0 +1,35 @@
+[workspace]
+authors = ["luciorq <luciorqueiroz@gmail.com>"]
+channels = ["conda-forge"]
+name = "blast-zig-pixi"
+platforms = ["linux-64", "osx-64", "osx-arm64", "win-64"]
+version = "0.1.0"
+preview = ["pixi-build"]
+
+# Installing the workspace environment builds the `blast` package from this
+# repo and puts its binaries (blastn, makeblastdb, ...) on the env PATH.
+[dependencies]
+blast = { path = "." }
+
+[tasks]
+blastn-version = "blastn -version"
+
+# v3 extras consumption: the `scripts` environment additionally pulls the
+# package's optional `scripts` dependency group (perl + python), making
+# the bundled helper scripts runnable:
+#   pixi run -e scripts update-blastdb-check
+[feature.scripts.dependencies]
+blast = { path = ".", extras = ["scripts"] }
+
+[feature.scripts.tasks]
+update-blastdb-check = "perl -c $CONDA_PREFIX/bin/update_blastdb.pl"
+
+[environments]
+scripts = { features = ["scripts"], no-default-feature = true }
+
+[package]
+name = "blast"
+version = "2.17.0"
+
+[package.build]
+backend = { name = "pixi-build-rattler-build", version = "*" }
