@@ -2,7 +2,16 @@
 authors = ["luciorq <luciorqueiroz@gmail.com>"]
 channels = ["conda-forge"]
 name = "blast-zig-pixi"
-platforms = ["linux-64", "osx-64", "osx-arm64", "win-64"]
+# The x86_64 entries declare an assumed CPU microarch level (__archspec)
+# so lockfile solves for foreign platforms can satisfy the package's
+# _x86_64-microarch-level >=2 gate — the same v2 floor the binaries
+# require at runtime.
+platforms = [
+  { platform = "linux-64", archspec = "x86_64_v2" },
+  { platform = "osx-64", archspec = "x86_64_v2" },
+  { platform = "win-64", archspec = "x86_64_v2" },
+  "osx-arm64",
+]
 version = "0.1.0"
 preview = ["pixi-build"]
 

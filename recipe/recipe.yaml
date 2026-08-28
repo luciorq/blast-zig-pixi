@@ -16,7 +16,7 @@ build:
   # hundreds digit (203 / 303) so the solver prefers the highest level
   # the CPU supports (prefix.dev microarch pattern). Non-x86_64 targets
   # never touch microarch_level and stay a single variant at the base.
-  number: ${{ (3 + microarch_level|int * 100) if x86_64 else 3 }}
+  number: ${{ (4 + microarch_level|int * 100) if x86_64 else 4 }}
   script:
     env:
       MICROARCH_LEVEL: ${{ microarch_level if x86_64 else "" }}
@@ -31,8 +31,9 @@ build:
 requirements:
   build:
     # zig cc / zig c++ are the C/C++ compilers on every platform; no
-    # gcc/clang/msvc toolchain packages are pulled in.
-    - zig
+    # gcc/clang/msvc toolchain packages are pulled in. Pinned to the
+    # version the shims and benchmarks were validated against.
+    - zig ==0.16.0
     - if: unix
       then:
         # Complete userland for NCBI's configure/make; the build script
@@ -90,6 +91,16 @@ requirements:
       then:
         # Must match the glibc floor pinned in build.sh's zig target.
         - __glibc >=2.17
+    - if: x86_64
+      then:
+        # __archspec-gated microarch constraint (conda-forge's underscore
+        # package), declared directly as a run dep rather than via the
+        # x86_64-microarch-level build metapackage's run export: the
+        # build-time route would need __archspec during the backend's
+        # host solve (which it doesn't detect), and we take the compiler
+        # flags from the shim anyway. Install-time semantics identical:
+        # each variant only installs on CPUs that can run it.
+        - _x86_64-microarch-level >=${{ microarch_level }}
     - if: osx
       then:
         # conda-forge's libcxx ships no run_exports, so the C++ runtime
@@ -123,5 +134,8 @@ about:
     primary biological sequence information. This package is built from
     the NCBI C++ Toolkit sources using zig cc / zig c++ as the compiler
     toolchain.
-  license: NCBI-PD
+  # NCBI-PD covers the toolkit itself; the statically linked bundled
+  # components carry their own terms: Mbed TLS (Apache-2.0), PCRE2
+  # (BSD-3-Clause), Cloudflare zlib (Zlib).
+  license: NCBI-PD AND Apache-2.0 AND BSD-3-Clause AND Zlib
   license_file: c++/scripts/projects/blast/LICENSE

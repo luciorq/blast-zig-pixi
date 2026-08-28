@@ -1,7 +1,11 @@
 # CPU microarchitecture variant axis (x86_64 only — the recipe references
 # microarch_level exclusively under `if: x86_64`, so non-x86_64 targets
-# collapse to a single variant). Level 2 = SSE4.2/popcnt (the floor NCBI's
-# code requires anyway); level 3 = AVX2.
+# collapse to a single variant). Level 2 = SSE4.2/popcnt, the floor
+# NCBI's code requires anyway.
+#
+# Level 3 (AVX2) was built and benchmarked 2026-08-25 (BENCHMARK.md):
+# byte-identical output, all timing deltas within noise — BLAST's hot
+# paths are explicit SSE4.2 intrinsics, so AVX2 auto-vectorization adds
+# nothing. Re-enable by adding "3" here if that ever changes.
 microarch_level:
   - "2"
-  - "3"

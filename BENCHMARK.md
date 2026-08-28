@@ -54,6 +54,32 @@ lines. Same alignments, same scores, same e-values.
   on any realistically sized nucleotide search. Treat those two rows as
   a fixed-overhead measurement, not a throughput one.
 
+## Microarch variants: x86-64-v2 vs v3 (AVX2)
+
+Following the prefix.dev microarch pattern, a `microarch_level` variant
+axis was wired (see `recipe/variants.yaml`) and both levels were built
+and compared on the same machine (`bench/microbench.sh`, level 2 =
+`h3989d59_203`, level 3 = `h43b3d28_303`).
+
+**Result: AVX2 is not worth shipping for BLAST.** `blastp` tabular
+output is byte-identical between variants (839 lines), and every timing
+delta sits inside the noise:
+
+| Task | v2 | v3 | verdict |
+|---|---:|---:|---|
+| `blastp` 1 thread | 15.75 ± 0.23 s | 15.55 ± 0.09 s | 1.01× ± 0.02 — noise |
+| `blastp` 8 threads | 2.87 ± 0.30 s | 3.03 ± 0.07 s | overlapping σ — noise |
+| `blastn` 1 thread | 194 ± 16 ms | 185 ± 11 ms | noise |
+| `makeblastdb` | 373 ± 10 ms | 380 ± 9 ms | noise |
+
+This matches the mechanism: BLAST's hot paths use explicit SSE4.2
+intrinsics (microarch level 2), so level 3 only changes what the
+compiler auto-vectorizes elsewhere — which measures as nothing. The
+variant axis stays in place with a single level ("2"), so a future
+level-3 build is a one-line change; the level-2 gating run dependency
+(`_x86_64-microarch-level >=2`) now also makes the package's real CPU
+floor solver-enforced instead of a documented SIGILL.
+
 ## Reproducing
 
 ```sh

@@ -32,9 +32,9 @@ pixi run blastn-version
 
 | Platform | State |
 |---|---|
-| linux-64 | Built and tested (`blast-2.17.0-hcc556be_2.conda`), benchmarked against bioconda |
-| win-64 | Built and tested (`blast-2.17.0-h9490d1a_2.conda`), 20 executables, real searches verified |
-| osx-arm64 | Built and tested (`blast-2.17.0-h60d57d3_2.conda`), real searches verified |
+| linux-64 | Built and tested (`blast-2.17.0-h3989d59_204.conda`), benchmarked against bioconda |
+| win-64 | Built and tested (`blast-2.17.0-ha1ecfd9_204.conda`), 20 executables, real searches verified |
+| osx-arm64 | Built and tested (`blast-2.17.0-h60d57d3_4.conda`), real searches verified |
 | osx-64 | Recipe covers it; unbuilt (no Intel Mac available) |
 
 ## Design: one build, every OS
@@ -186,9 +186,36 @@ configuration). Two features are used:
   The workspace demonstrates consumption: `pixi run -e scripts
   update-blastdb-check`. Base installs stay lean.
 - **Variant flags** — every build carries `toolchain:zig`, and x86_64
-  builds carry `cpu:x86_64_v2` (the compiled-in baseline). A future AVX2
-  build would carry `cpu:x86_64_v3` and be selectable via
-  `blast[flags=[cpu:x86_64_v3]]`. Flag segments allow only `[a-z0-9_]`.
+  builds carry `cpu:x86_64_v${level}` (the compiled-in baseline),
+  selectable via `blast[flags=[cpu:x86_64_v2]]`. Flag segments allow
+  only `[a-z0-9_]`.
+
+### Microarch variant axis (prefix.dev pattern)
+
+`recipe/variants.yaml` defines a `microarch_level` axis wired the way
+the prefix.dev "CPU-optimized packages" post describes: the level
+contributes the hundreds digit of the build number (203, 303, …) so the
+solver prefers the highest installable level; each variant carries an
+`__archspec`-gated run dependency (`_x86_64-microarch-level >=N`) so it
+can only install on capable CPUs; and the level flows into the zig shim
+as `-march=x86_64_v${level}`. Non-x86_64 platforms never reference the
+variable and stay a single variant at the base number.
+
+Two deviations from the blog, both deliberate: the gating constraint is
+declared directly as a run dependency instead of via the
+`x86_64-microarch-level` build metapackage (the backend's host solve
+does not detect `__archspec`, and the metapackage's compiler-activation
+flags are meaningless to the zig shim anyway), and only level 2 is
+enabled — a level-3 (AVX2) build was benchmarked and shipped nothing
+(see BENCHMARK.md). The backend builds the full variant matrix from one
+`pixi build` invocation.
+
+Consumer-side corollary: a workspace that locks this package for
+platforms other than the one it runs on cannot detect `__archspec`
+there, so `pixi.toml` declares the assumed floor per platform
+(`{ platform = "linux-64", archspec = "x86_64_v2" }` inline entries in
+`workspace.platforms` — the modern replacement for the deprecated
+`[system-requirements]` table).
 
 Packages record this in `index.json` (`repodata_revision: 3`,
 `extra_depends`, `flags`); `rattler-index` places v3 packages in a
@@ -213,6 +240,21 @@ name and the dynamic section never contains a placeholder at all.
 See [BENCHMARK.md](BENCHMARK.md): outputs are byte-identical to the
 bioconda 2.17.0 package, compute-bound performance is equal within 2–3%,
 and startup/`makeblastdb` are ~20% faster (static linking).
+
+## Release channel & licensing
+
+- **Channel**: releases target the `universe` channel on prefix.dev
+  (currently private). Because the packages carry v3 metadata, channel
+  consumers need a v3-aware client (pixi ≥ 0.71); pre-v3 clients do not
+  see v3 packages in channel repodata at all, though direct
+  `.conda`-URL installs still work (the archive format is unchanged and
+  unknown metadata fields are ignored — extras simply never apply).
+- **Licensing**: the repository (recipe, shims, bench harness) is MIT —
+  see `LICENSE.txt`. The packages contain NCBI BLAST+ (US-Government
+  public domain, `NCBI-PD`; the notice ships as the package license
+  file) plus statically linked bundled components (Mbed TLS Apache-2.0,
+  PCRE2 BSD-3-Clause, Cloudflare zlib Zlib), reflected in the package
+  license expression. NCBI requests citation in derivative work.
 
 ## Runtime notes
 
