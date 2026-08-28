@@ -11,6 +11,7 @@ platforms = [
   { platform = "osx-64", archspec = "x86_64_v2" },
   { platform = "win-64", archspec = "x86_64_v2" },
   "osx-arm64",
+  "linux-aarch64",
 ]
 version = "0.1.0"
 preview = ["pixi-build"]

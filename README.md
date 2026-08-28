@@ -35,7 +35,19 @@ pixi run blastn-version
 | linux-64 | Built and tested (`blast-2.17.0-h3989d59_204.conda`), benchmarked against bioconda |
 | win-64 | Built and tested (`blast-2.17.0-ha1ecfd9_204.conda`), 20 executables, real searches verified |
 | osx-arm64 | Built and tested (`blast-2.17.0-h60d57d3_4.conda`), real searches verified |
-| osx-64 | Recipe covers it; unbuilt (no Intel Mac available) |
+| osx-64 | Recipe covers it; first build lands via CI (`macos-15-intel`) |
+| linux-aarch64 | Wired (target table, lockfile); first build lands via CI (`ubuntu-24.04-arm`) |
+
+## CI / releases
+
+`.github/workflows/build.yml` builds all five platforms on native
+GitHub-hosted runners (including the two never built locally: osx-64 on
+`macos-15-intel`, linux-aarch64 on `ubuntu-24.04-arm`), tests every
+package in a clean environment, and uploads the `.conda` files as
+workflow artifacts. Pushing a `v*` tag additionally publishes to the
+prefix.dev `universe` channel — this needs a `PREFIX_API_KEY` repository
+secret (prefix.dev → account settings → API keys). Manual runs via
+`workflow_dispatch`.
 
 ## Design: one build, every OS
 
