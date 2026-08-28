@@ -286,15 +286,35 @@ EOF
 write_compiler_shim "${wrap_dir}/zig-cc" cc
 write_compiler_shim "${wrap_dir}/zig-cxx" c++
 
-cat > "${wrap_dir}/ar" <<EOF
+# zig 0.16.0's `zig ar` cannot create Mach-O archives on x86_64 (fails
+# on a trivial two-object case; the arm64 build works). Where the recipe
+# provides the standalone llvm-ar (osx-64), prefer it.
+ar_exe="$(command -v llvm-ar || true)"
+ranlib_exe="$(command -v llvm-ranlib || true)"
+
+if [[ -n "${ar_exe}" ]]; then
+  cat > "${wrap_dir}/ar" <<EOF
+#!/usr/bin/env bash
+exec "${ar_exe}" "\$@"
+EOF
+else
+  cat > "${wrap_dir}/ar" <<EOF
 #!/usr/bin/env bash
 exec "${zig_exe}" ar "\$@"
 EOF
+fi
 
-cat > "${wrap_dir}/ranlib" <<EOF
+if [[ -n "${ranlib_exe}" ]]; then
+  cat > "${wrap_dir}/ranlib" <<EOF
+#!/usr/bin/env bash
+exec "${ranlib_exe}" "\$@"
+EOF
+else
+  cat > "${wrap_dir}/ranlib" <<EOF
 #!/usr/bin/env bash
 exec "${zig_exe}" ranlib "\$@"
 EOF
+fi
 
 chmod +x "${wrap_dir}/ar" "${wrap_dir}/ranlib"
 
@@ -494,6 +514,12 @@ configure_args=(
   --without-gnutls
   --without-gcrypt
   --without-boost
+  # CI runners preinstall ccache; NCBI's configure auto-adopts any it
+  # finds, and on Windows (where the MSYS2 PATH keeps the system PATH
+  # visible) ccache cannot exec our bash shims — every compile fails
+  # with "execute_noreturn ... failed". Same class of leak for distcc.
+  --without-ccache
+  --without-distcc
   --with-z="${conda_root}"
   --with-bz2="${conda_root}"
   --with-lmdb="${conda_root}"

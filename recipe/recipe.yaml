@@ -16,7 +16,7 @@ build:
   # hundreds digit (203 / 303) so the solver prefers the highest level
   # the CPU supports (prefix.dev microarch pattern). Non-x86_64 targets
   # never touch microarch_level and stay a single variant at the base.
-  number: ${{ (4 + microarch_level|int * 100) if x86_64 else 4 }}
+  number: ${{ (5 + microarch_level|int * 100) if x86_64 else 5 }}
   script:
     env:
       MICROARCH_LEVEL: ${{ microarch_level if x86_64 else "" }}
@@ -34,6 +34,14 @@ requirements:
     # gcc/clang/msvc toolchain packages are pulled in. Pinned to the
     # version the shims and benchmarks were validated against.
     - zig ==0.16.0
+    # zig 0.16.0's embedded `zig ar` cannot create Mach-O archives on
+    # x86_64 ("unable to open ...: No such file or directory", every
+    # argument form, reproduced in isolation) while the arm64 build is
+    # fine. The shims fall back to the standalone llvm-ar on this one
+    # platform.
+    - if: osx and x86_64
+      then:
+        - llvm-tools
     - if: unix
       then:
         # Complete userland for NCBI's configure/make; the build script
