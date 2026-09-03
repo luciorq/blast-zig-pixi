@@ -86,7 +86,11 @@ requirements:
     # omp.h/libomp that zig cc does not bundle.
     - zlib
     - bzip2
-    - lmdb
+    # No lmdb on conda-forge for win-arm64; the toolkit's bundled copy
+    # is used there instead (--without-lmdb in build.sh).
+    - if: target_platform != "win-arm64"
+      then:
+        - lmdb
     - libsqlite
     - llvm-openmp
     - if: osx

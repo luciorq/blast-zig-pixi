@@ -37,6 +37,7 @@ pixi run blastn-version
 | osx-arm64 | Built and tested (`blast-2.17.0-h60d57d3_4.conda`), real searches verified |
 | osx-64 | Recipe covers it; first build lands via CI (`macos-15-intel`) |
 | linux-aarch64 | Wired (target table, lockfile); first build lands via CI (`ubuntu-24.04-arm`) |
+| win-arm64 | Experimental CI cross-build (`windows-11-arm`, win-64 toolchain under x64 emulation, `continue-on-error`) — see feasibility section |
 
 ## CI / releases
 
@@ -150,6 +151,48 @@ no system libc++. What made that possible:
 The only system artefact left is `/usr/lib/libSystem.B.dylib`, which is
 the macOS ABI itself; zig links it through its own bundled stub rather
 than the SDK. That is the counterpart of libc on Linux, not a build tool.
+
+## Windows ARM64 (win-arm64): feasibility
+
+Assessed 2026-09-02: **feasible, with one real blocker and one workaround
+pattern already proven elsewhere in this project.** Verified inventory:
+
+| Requirement | Status |
+|---|---|
+| CI hardware | ✅ `windows-11-arm` GitHub-hosted runner (partner image, GA; free for public repos, not covered by GitHub's standard SLA) |
+| MSYS2 userland | ✅ the `m2-*` conda packages are **noarch** — they install on any subdir and their x86_64 binaries run under Windows-on-ARM's built-in x64 emulation |
+| zlib, bzip2, libsqlite, llvm-openmp | ✅ published for `win-arm64` on conda-forge |
+| lmdb | ⚠️ not on conda-forge for `win-arm64` — but the NCBI toolkit bundles its own copy (`src/util/lmdb`), so a scoped `--without-lmdb` branch (external→bundled) covers it |
+| zig compiler | ❌ conda-forge ships **no native win-arm64 zig** (only the noarch `zig-compiler` shim, whose `zig` dependency is unsolvable there) |
+
+The zig gap has two routes:
+
+1. **Cross-build (works today, mirrors our Rosetta pattern):** run the
+   *win-64* zig and m2 userland under x64 emulation on the ARM machine,
+   with `-target aarch64-windows-gnu`. Configure's test programs and the
+   mid-build `datatool` are aarch64 binaries that run natively on the
+   same machine — the exact inversion of the osx-64-via-Rosetta setup we
+   validated on omicron. This requires invoking rattler-build directly
+   with `--build-platform win-64 --target-platform win-arm64`; the
+   pixi-build backend path cannot express a split build/target today.
+2. **Native (cleaner, needs upstream):** add `win-arm64` to the
+   conda-forge zig feedstock — zig upstream already ships
+   aarch64-windows release binaries, so this is packaging plumbing, not
+   porting work.
+
+Recipe deltas either way are small and mostly already arch-guarded:
+`aarch64-windows-gnu` in the target table; the microarch axis, CPU flags
+and `__archspec` gating are all under `if: x86_64` and skip
+automatically; the `.exe` staging and MSYS2 bootstrap are shared; and
+`ncbi_stack_win64.cpp`'s DbgHelp API is architecture-neutral.
+
+Honest unknowns until a first build runs: mingw-w64 **aarch64** headers
+with NCBI's `NCBI_OS_MSWIN` code path (x86_64-mingw is proven, aarch64
+is not), and whether `zig ar` misbehaves there the way it does on
+x86_64-macos (the `llvm-tools` fallback pattern is ready if so — but
+llvm-tools would also need a win-arm64 or emulated x64 build). Expect
+the usual two-or-three-iteration bring-up, gated `continue-on-error` in
+CI until green.
 
 ## Windows: building NCBI's toolkit without MSVC
 

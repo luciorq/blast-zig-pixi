@@ -56,6 +56,11 @@ case "${target_platform}" in
   linux-64)      zig_target="x86_64-linux-gnu.2.17"  ;;
   linux-aarch64) zig_target="aarch64-linux-gnu.2.17" ;;
   win-64)        zig_target="x86_64-windows-gnu"     ;;
+  # Cross-built with the win-64 zig running under x64 emulation
+  # (conda-forge has no native win-arm64 zig yet); the produced aarch64
+  # binaries run natively on the same machine, so configure's test
+  # programs and datatool work.
+  win-arm64)     zig_target="aarch64-windows-gnu"    ;;
   osx-64 | osx-arm64) ;;
 esac
 
@@ -522,9 +527,16 @@ configure_args=(
   --without-distcc
   --with-z="${conda_root}"
   --with-bz2="${conda_root}"
-  --with-lmdb="${conda_root}"
   --with-sqlite3="${conda_root}"
 )
+
+if [[ "${target_platform}" == "win-arm64" ]]; then
+  # conda-forge has no lmdb for win-arm64; the toolkit bundles its own
+  # copy (src/util/lmdb) which --without-lmdb selects.
+  configure_args+=(--without-lmdb)
+else
+  configure_args+=(--with-lmdb="${conda_root}")
+fi
 
 if ${on_windows}; then
   # NCBI declares its Windows system libraries with MSVC-only
