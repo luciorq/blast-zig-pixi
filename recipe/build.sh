@@ -552,9 +552,17 @@ if ${on_windows}; then
   # and the host is not cygwin (the same macro its MSVC builds use).
   # build == host keeps autoconf out of cross-compilation mode — the
   # binaries we produce run natively on this machine.
+  # win-arm64 is cross-built with x64 tools under emulation, but the
+  # produced aarch64 binaries run natively here, so build == host keeps
+  # autoconf out of cross-compiling mode (it would otherwise refuse to
+  # run its test programs).
+  case "${target_platform}" in
+    win-arm64) mingw_triple=aarch64-w64-mingw32 ;;
+    *)         mingw_triple=x86_64-w64-mingw32 ;;
+  esac
   configure_args+=(
-    --build=x86_64-w64-mingw32
-    --host=x86_64-w64-mingw32
+    --build="${mingw_triple}"
+    --host="${mingw_triple}"
   )
 else
   # rpath is a unix concept; on Windows the DLL search path is used.

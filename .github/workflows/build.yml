@@ -78,14 +78,31 @@ jobs:
 
       - name: Cross-build win-arm64 with win-64 toolchain
         shell: bash
+        # Bring-up iteration: a hard cap well below the job limit turns a
+        # hang into a failed step (the first attempt hung silently in
+        # configure for 5.5 h until the job timeout), so the diagnostics
+        # step below can still run and show where it stopped.
         run: |
           set -euo pipefail
-          pixi exec --spec rattler-build -- rattler-build build --v3 \
+          timeout 90m pixi exec --spec rattler-build -- rattler-build build --v3 \
             -r recipe/recipe.yaml \
             --build-platform win-64 \
             --target-platform win-arm64 \
             -c conda-forge \
             --output-dir dist
+
+      - name: Diagnostics (where did configure/make stop?)
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          echo "== config.log tail:"
+          f=$(find dist/bld -name config.log -path '*c++*' 2>/dev/null | head -1)
+          [ -n "$f" ] && tail -n 120 "$f" || echo "(no config.log found)"
+          echo "== last configure/make output lines:"
+          for l in $(find dist/bld -name '*.log' -newer recipe/recipe.yaml 2>/dev/null | head -20); do
+            echo "--- $l"; tail -n 15 "$l"
+          done
 
       - name: Test package in a clean environment
         shell: bash
