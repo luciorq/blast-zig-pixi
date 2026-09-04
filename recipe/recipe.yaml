@@ -12,7 +12,10 @@ source:
   sha256: 502057a88e9990e34e62758be21ea474cc0ad68d6a63a2e37b2372af1e5ea147
 
 build:
-  # Base build number 3; on x86_64 the microarch level contributes its
+  # ANY change that alters the built package needs a bump here: the
+  # channel upload runs with --skip-existing, so an unbumped rebuild of
+  # an already-published build string is silently skipped.
+  # Base build number 5; on x86_64 the microarch level contributes its
   # hundreds digit (203 / 303) so the solver prefers the highest level
   # the CPU supports (prefix.dev microarch pattern). Non-x86_64 targets
   # never touch microarch_level and stay a single variant at the base.
@@ -20,6 +23,9 @@ build:
   script:
     env:
       MICROARCH_LEVEL: ${{ microarch_level if x86_64 else "" }}
+      # Watchdog budget for emulated cross builds (see build.sh); strict
+      # env isolation would drop it unless forwarded here.
+      ZIG_SHIM_TIMEOUT: ${{ env.get("ZIG_SHIM_TIMEOUT", default="600") }}
   # v3 variant flags: provenance + the compiled-in CPU baseline,
   # selectable explicitly via e.g. blast[flags=[cpu:x86_64_v3]]. Flag
   # segments only allow [a-z0-9_].
@@ -134,6 +140,17 @@ tests:
       - blastp -version
       - makeblastdb -version
       - blastdbcmd -version
+  # End-to-end: makeblastdb -> blastdbcmd -> blastn/blastp self-hits on
+  # tiny databases, on every platform. python is a test-time requirement
+  # only.
+  - script:
+      - python tests/smoke.py
+    requirements:
+      run:
+        - python
+    files:
+      recipe:
+        - tests/smoke.py
 
 about:
   homepage: https://blast.ncbi.nlm.nih.gov/

@@ -2,6 +2,11 @@ name: build
 
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish this run's packages to prefix.dev/universe"
+        type: boolean
+        default: false
   push:
     branches: [main]
     tags: ["v*"]
@@ -78,13 +83,13 @@ jobs:
 
       - name: Cross-build win-arm64 with win-64 toolchain
         shell: bash
-        # Bring-up iteration: a hard cap well below the job limit turns a
-        # hang into a failed step (the first attempt hung silently in
-        # configure for 5.5 h until the job timeout), so the diagnostics
-        # step below can still run and show where it stopped.
+        # Capped below the job limit so a stall still fails the step and
+        # the diagnostics step below runs. The shims themselves retry a
+        # zig invocation that stalls (nondeterministic under emulation;
+        # two runs hung at different one-second configure link tests).
         run: |
           set -euo pipefail
-          timeout 90m pixi exec --spec rattler-build -- rattler-build build --v3 \
+          timeout 320m pixi exec --spec rattler-build -- rattler-build build --v3 \
             -r recipe/recipe.yaml \
             --build-platform win-64 \
             --target-platform win-arm64 \
@@ -116,8 +121,12 @@ jobs:
           done
 
       - uses: actions/upload-artifact@v4
+        # Two independent guards keep experimental output off the channel:
+        # no artifact at all on publishing runs, and a name outside the
+        # blast-* pattern the publish job downloads.
+        if: ${{ !startsWith(github.ref, 'refs/tags/') && !inputs.publish }}
         with:
-          name: blast-win-arm64-experimental
+          name: experimental-win-arm64
           path: |
             dist/*.conda
             dist/win-arm64/*.conda
@@ -125,7 +134,8 @@ jobs:
 
   publish:
     name: publish to prefix.dev
-    if: startsWith(github.ref, 'refs/tags/v')
+    # A v* tag, or a manual run of main with the publish box ticked.
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main')
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -137,6 +147,7 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
+          pattern: blast-*
           path: dist
           merge-multiple: true
 
@@ -144,10 +155,11 @@ jobs:
         env:
           PREFIX_API_KEY: ${{ secrets.PREFIX_API_KEY }}
         shell: bash
+        # --skip-existing makes re-publishing idempotent; the flip side is
+        # that a rebuilt package with an unbumped build number is skipped
+        # silently — bump build.number in recipe.yaml for any change.
         run: |
           set -euo pipefail
           ls -la dist/
-          for f in dist/*.conda; do
-            pixi exec --spec rattler-build -- \
-              rattler-build upload prefix --channel universe "$f"
-          done
+          pixi exec --spec rattler-build -- \
+            rattler-build upload prefix --channel universe --skip-existing dist/*.conda

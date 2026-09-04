@@ -19,6 +19,26 @@ C/C++ compiler toolchain on every platform.
   userland on `PATH` and re-invokes `recipe/build.sh` under `bash`. That is
   all it does — every real build step lives in `build.sh`.
 
+## Installing
+
+Packages are published to the public `universe` channel on prefix.dev
+(v3 metadata, so use pixi ≥ 0.71 — see *Release channel* below):
+
+```sh
+# one-off tool install
+pixi global install -c https://prefix.dev/universe -c conda-forge blast
+
+# in a project
+pixi init -c https://prefix.dev/universe -c conda-forge myproject
+cd myproject && pixi add blast
+# with working helper scripts (update_blastdb.pl etc.), v3 extras:
+pixi add "blast[extras=[scripts]]"
+```
+
+On x86_64 the solver picks the highest microarch variant your CPU
+supports automatically (`_x86_64-microarch-level`); see the variant
+section below.
+
 ## Building
 
 ```sh
@@ -30,14 +50,24 @@ pixi run blastn-version
 
 ## Status
 
-| Platform | State |
-|---|---|
-| linux-64 | Built and tested (`blast-2.17.0-h3989d59_204.conda`), benchmarked against bioconda |
-| win-64 | Built and tested (`blast-2.17.0-ha1ecfd9_204.conda`), 20 executables, real searches verified |
-| osx-arm64 | Built and tested (`blast-2.17.0-h60d57d3_4.conda`), real searches verified |
-| osx-64 | Recipe covers it; first build lands via CI (`macos-15-intel`) |
-| linux-aarch64 | Wired (target table, lockfile); first build lands via CI (`ubuntu-24.04-arm`) |
-| win-arm64 | Experimental CI cross-build (`windows-11-arm`, win-64 toolchain under x64 emulation, `continue-on-error`) — see feasibility section |
+All five release platforms build and pass the package tests on every CI
+run (latest: run 33789331808, 2026-09-03, with the `-version` tests; the
+smoke test below joins from the next run); the build strings below are
+the CI-built release artifacts.
+
+| Platform | Runner | Package | Notes |
+|---|---|---|---|
+| linux-64 | `ubuntu-latest` | `blast-2.17.0-h3989d59_205.conda` | benchmarked against bioconda; also built locally |
+| linux-aarch64 | `ubuntu-24.04-arm` | `blast-2.17.0-h7bd4480_5.conda` | CI only |
+| osx-64 | `macos-15-intel` | `blast-2.17.0-h5567b9d_205.conda` | CI only (llvm-ar fallback) |
+| osx-arm64 | `macos-15` | `blast-2.17.0-h60d57d3_5.conda` | also built locally, real searches verified |
+| win-64 | `windows-latest` | `blast-2.17.0-ha1ecfd9_205.conda` | also built locally, 20 executables, real searches verified |
+| win-arm64 | `windows-11-arm` | — | experimental cross-build, `continue-on-error`; see the bring-up log below |
+
+Package tests (run in a clean environment on every platform): `-version`
+of the four core tools, plus `recipe/tests/smoke.py`, which builds tiny
+nucleotide and protein databases, queries them with `blastdbcmd`,
+`blastn` and `blastp`, and checks for the expected 100 % self-hits.
 
 ## CI / releases
 
@@ -45,10 +75,26 @@ pixi run blastn-version
 GitHub-hosted runners (including the two never built locally: osx-64 on
 `macos-15-intel`, linux-aarch64 on `ubuntu-24.04-arm`), tests every
 package in a clean environment, and uploads the `.conda` files as
-workflow artifacts. Pushing a `v*` tag additionally publishes to the
-prefix.dev `universe` channel — this needs a `PREFIX_API_KEY` repository
-secret (prefix.dev → account settings → API keys). Manual runs via
-`workflow_dispatch`.
+workflow artifacts. Publishing to the prefix.dev `universe` channel
+happens either on a `v*` tag push or on a manual `workflow_dispatch`
+run with the *publish* box ticked; both need a `PREFIX_API_KEY`
+repository secret (prefix.dev → account settings → API keys, with
+upload rights on `universe`). Manual publishing is restricted to
+`main`. Uploads use `--skip-existing`, so re-publishing a run is
+idempotent — which also means a rebuilt package whose build number was
+not bumped is skipped silently: **bump `build.number` for any change
+that alters the package.** The experimental win-arm64 job uploads no
+artifact on publishing runs, and its artifact name sits outside the
+`blast-*` pattern the publish job downloads.
+
+To publish an already-built run from a workstation instead (e.g. the
+artifacts of a green `main` run), download them and run:
+
+```sh
+gh run download <run-id> -R luciorq/blast-zig-pixi --dir dist/ci
+pixi exec --spec rattler-build -- rattler-build upload prefix \
+  --channel universe --skip-existing dist/ci/*/*.conda
+```
 
 ## Design: one build, every OS
 
@@ -194,6 +240,37 @@ llvm-tools would also need a win-arm64 or emulated x64 build). Expect
 the usual two-or-three-iteration bring-up, gated `continue-on-error` in
 CI until green.
 
+### Bring-up log (route 1, experimental CI job)
+
+- **Run 1 (2026-09-03, 33746309276):** the split-platform resolve works
+  (win-64 build env under emulation, win-arm64 host env), the shims
+  compile and link aarch64 test programs that run natively. Configure
+  stalled after ~17 min until the 350-min job timeout. The host triple
+  was still `x86_64-w64-mingw32`.
+- **Run 2 (33789331808):** with `aarch64-w64-mingw32` and a 90-min step
+  cap, configure ran 278 checks (each link test ≈ 1 s, so the emulated
+  toolchain is *not* slow per se) and then stalled on a different,
+  equally trivial check (`dbopen`) for 76 min. The two stalls at
+  unrelated checks point at a nondeterministic hang inside zig under
+  x64 emulation, not at a configure problem.
+- **Mitigation now in place:** when `build_platform != target_platform`
+  the shims run zig under `timeout` with two retries; native builds
+  still `exec` zig directly. Budgets: 120 s for configure's `conftest`
+  probes, `ZIG_SHIM_TIMEOUT` (default 600 s, forwarded through the
+  recipe's script env) for compiles, three times that for links. The
+  step cap is raised to 320 min to measure how far a full emulated
+  compile gets.
+- **Structural limit:** the full toolkit build takes ~4 h natively on a
+  4-core win-64 runner; under emulation it will not fit GitHub's 6-hour
+  job ceiling. Route 1 therefore validates the recipe (patches, headers,
+  linking) but cannot ship. Shipping needs route 2 — a native zig on
+  conda-forge. The zig feedstock already models `win-arm64` as a *cross
+  target* (`zig_win-arm64` exists on win-64) but lists it under
+  `xc_host_valid` exclusions, i.e. no win-arm64-hosted zig; that is the
+  upstream request to make. With it, this recipe would take zig from
+  the host env on win-arm64 and keep the emulated `m2-*` userland for
+  configure/make, whose cost is negligible.
+
 ## Windows: building NCBI's toolkit without MSVC
 
 NCBI supports Windows only through MSVC. Getting a `-windows-gnu` build
@@ -298,8 +375,10 @@ and startup/`makeblastdb` are ~20% faster (static linking).
 
 ## Release channel & licensing
 
-- **Channel**: releases target the `universe` channel on prefix.dev
-  (currently private). Because the packages carry v3 metadata, channel
+- **Channel**: releases go to the public `universe` channel on
+  prefix.dev (`https://prefix.dev/universe`; the channel also holds
+  unrelated packages of the same owner, so add `conda-forge` after it
+  for dependencies). Because the packages carry v3 metadata, channel
   consumers need a v3-aware client (pixi ≥ 0.71); pre-v3 clients do not
   see v3 packages in channel repodata at all, though direct
   `.conda`-URL installs still work (the archive format is unchanged and

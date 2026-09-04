@@ -77,6 +77,23 @@ case "${target_platform}" in
     march="-march=x86_64_v${MICROARCH_LEVEL:-2}" ;;
 esac
 
+# Emulated cross builds (the win-64 zig running under x64 emulation on a
+# windows-11-arm runner) exhibit nondeterministic hangs inside zig: two
+# CI runs stalled at different, otherwise one-second configure link
+# tests for 75+ minutes each. When build and target platform differ, the
+# shims run zig under a watchdog and retry a stalled invocation instead
+# of letting the whole job idle to its timeout. Native builds exec zig
+# directly, as before.
+# Note: this also arms for a genuine (non-emulated) cross build; harmless
+# but visible in the log line below. Tunable through the recipe's
+# script env (ZIG_SHIM_TIMEOUT), which rattler-build's strict env
+# isolation would otherwise drop.
+shim_timeout=""
+if [[ "${build_platform:-${target_platform}}" != "${target_platform}" ]]; then
+  shim_timeout="${ZIG_SHIM_TIMEOUT:-600}"
+fi
+echo "zig shim watchdog: ${shim_timeout:-off}"
+
 # conda-forge's liblmdb.so carries no SONAME, so lld records the literal
 # path it resolved — an absolute placeholder path into the build prefix.
 # Post-link patchelf --replace-needed is NOT a safe fix: it leaves the old
@@ -123,6 +140,7 @@ conda_root="${conda_root}"
 hostlib_dir="${hostlib_dir}"
 on_windows=${on_windows}
 on_macos=${on_macos}
+shim_timeout="${shim_timeout}"
 EOF
   cat >> "${path}" <<'EOF'
 # Introspection flags: clang rejects glibc-versioned triples for these,
@@ -281,9 +299,33 @@ fi
 # -fno-sanitize=undefined: zig enables UBSan trap mode by default and the
 # NCBI/zlib C code is not clean under it. -Wno-date-time: zig promotes
 # -Wdate-time to an error; NCBI uses __DATE__/__TIME__.
-exec "$zig_exe" "$tool" ${zig_target:+-target "$zig_target"} ${march} \
-  -fno-sanitize=undefined -Wno-date-time \
-  "${args[@]}" "${link_extra[@]}" "${omp[@]}"
+cmd=("$zig_exe" "$tool" ${zig_target:+-target "$zig_target"} ${march}
+  -fno-sanitize=undefined -Wno-date-time
+  "${args[@]}" "${link_extra[@]}" "${omp[@]}")
+
+if [ -z "$shim_timeout" ]; then
+  exec "${cmd[@]}"
+fi
+
+# Emulated cross build: bounded retries around a zig that sometimes
+# never returns (see build.sh). Both observed stalls were in one-second
+# configure tests, so those get a short budget; real compiles and links
+# of NCBI's large TUs under emulation may legitimately take much longer
+# and get 3x the configured budget. timeout exits 124 on TERM and 137
+# when it had to escalate to KILL — both are stalls.
+budget="$shim_timeout"
+case " ${args[*]} " in
+  *conftest*) budget=120 ;;
+  *) $linking && budget=$((shim_timeout * 3)) ;;
+esac
+for attempt in 1 2 3; do
+  timeout -k 15 "$budget" "${cmd[@]}"
+  rc=$?
+  case "$rc" in 124|137) ;; *) exit "$rc" ;; esac
+  echo "zig shim: attempt $attempt stalled for ${budget}s (rc=$rc), retrying: $tool ${args[*]}" >&2
+done
+echo "zig shim: giving up after 3 stalled attempts" >&2
+exit 124
 EOF
   chmod +x "${path}"
 }
