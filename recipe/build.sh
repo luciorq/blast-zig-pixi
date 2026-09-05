@@ -436,6 +436,23 @@ if ${on_windows}; then
     "${SRC_DIR}/c++/src/corelib/ncbi_stack_win32.cpp"
   grep -q 'sizeof(IMAGEHLP_SYMBOL64)' "${SRC_DIR}/c++/src/corelib/ncbi_stack_win64.cpp"
 
+  # ncbi_stack_win64.cpp seeds StackWalk64 from the x86-64 CONTEXT
+  # registers (Rip/Rbp/Rsp) and machine type; on ARM64 the CONTEXT has
+  # Pc/Fp/Sp and the image type is ARM64. First aarch64 compile blocker
+  # (CI run 33922689196); everything else in the MSWIN path is
+  # architecture-neutral.
+  if [[ "${target_platform}" == "win-arm64" ]]; then
+    sed -i \
+      -e 's|IMAGE_FILE_MACHINE_AMD64|IMAGE_FILE_MACHINE_ARM64|' \
+      -e 's|= c\.Rip;|= c.Pc;|' \
+      -e 's|= c\.Rbp;|= c.Fp;|' \
+      -e 's|= c\.Rsp;|= c.Sp;|' \
+      "${SRC_DIR}/c++/src/corelib/ncbi_stack_win64.cpp"
+    grep -q 'IMAGE_FILE_MACHINE_ARM64' "${SRC_DIR}/c++/src/corelib/ncbi_stack_win64.cpp"
+    grep -q '= c\.Pc;' "${SRC_DIR}/c++/src/corelib/ncbi_stack_win64.cpp"
+    ! grep -q 'c\.R[is]p\|c\.Rbp' "${SRC_DIR}/c++/src/corelib/ncbi_stack_win64.cpp"
+  fi
+
   # The MSVC debug-CRT report APIs (_CrtSetReport*/_CRTDBG_*) are not
   # declared by mingw-w64's crtdbg.h and only affect the MSVC debug
   # runtime, so compile that block out elsewhere.

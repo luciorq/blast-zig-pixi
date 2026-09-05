@@ -260,6 +260,15 @@ CI until green.
   recipe's script env) for compiles, three times that for links. The
   step cap is raised to 320 min to measure how far a full emulated
   compile gets.
+- **Run 3 (2026-09-04, 33922689196):** with the watchdog armed,
+  configure completed all 543 checks in ~25 min with zero retries and
+  generated the Makefiles. The first *compile* then hit the first
+  genuinely architecture-specific code: `ncbi_stack_win64.cpp` seeds
+  `StackWalk64` from the x86-64 `CONTEXT` registers (`Rip`/`Rbp`/`Rsp`).
+  Patched to `Pc`/`Fp`/`Sp` and `IMAGE_FILE_MACHINE_ARM64` on
+  win-arm64; the mingw-w64 aarch64 headers otherwise accepted NCBI's
+  `NCBI_OS_MSWIN` code without complaint, which answers the main
+  "honest unknown" above.
 - **Structural limit:** the full toolkit build takes ~4 h natively on a
   4-core win-64 runner; under emulation it will not fit GitHub's 6-hour
   job ceiling. Route 1 therefore validates the recipe (patches, headers,
